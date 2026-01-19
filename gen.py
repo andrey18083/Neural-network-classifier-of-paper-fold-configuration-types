@@ -25,6 +25,13 @@ class SoftFoldGenerator:
         
         fold_x = (w / 2) + wobble
 
+        line_points = []
+        step = 5
+        for y in range(0, h, step):
+            x = float(fold_x[y, 0])
+            line_points.append([x, float(y)])
+        fold_lines = [line_points]
+
         dist_norm = np.abs(grid_x - fold_x) / (w / 2)
         
         amplitude = w * 0.05 
@@ -59,7 +66,7 @@ class SoftFoldGenerator:
         warped_mask = cv2.remap(mask_src, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         warped_mask = cv2.GaussianBlur(warped_mask, (3, 3), 0) 
         
-        return warped_img, warped_mask
+        return warped_img, warped_mask, fold_lines
 
     def apply_z_fold(self, img):
         h, w = img.shape[:2]
@@ -74,6 +81,13 @@ class SoftFoldGenerator:
         f1_map = base_f1 + wobble1
         f2_map = base_f2 + wobble2
         
+        line1, line2 = [], []
+        step = 5
+        for y in range(0, h, step):
+            line1.append([float(f1_map[y, 0]), float(y)])
+            line2.append([float(f2_map[y, 0]), float(y)])
+        fold_lines = [line1, line2]
+
         d1 = np.abs(grid_x - f1_map)
         d2 = np.abs(grid_x - f2_map)
         
@@ -123,7 +137,7 @@ class SoftFoldGenerator:
         mask_src = np.full((h, w), 255, dtype=np.uint8)
         warped_mask = cv2.remap(mask_src, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         
-        return warped_img, warped_mask
+        return warped_img, warped_mask, fold_lines
 
     def apply_cross_fold(self, img):
         h, w = img.shape[:2]
@@ -134,6 +148,17 @@ class SoftFoldGenerator:
         
         wobble_h = self._get_curve(w, amplitude=h*0.006).reshape(1, -1)
         cy_map = (h / 2) + wobble_h
+
+        line_v = []
+        step = 5
+        for y in range(0, h, step):
+            line_v.append([float(cx_map[y, 0]), float(y)])
+        
+        line_h = []
+        for x in range(0, w, step):
+            line_h.append([float(x), float(cy_map[0, x])])
+            
+        fold_lines = [line_v, line_h]
         
         amp_factor = 0.04 
         decay = 10.0
@@ -189,7 +214,7 @@ class SoftFoldGenerator:
         warped_mask = cv2.remap(mask_src, map_x, map_y, interpolation=cv2.INTER_LINEAR, 
                                 borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         
-        return warped_img, warped_mask
+        return warped_img, warped_mask, fold_lines
     
 
     def apply_grid_fold(self, img):
@@ -209,6 +234,19 @@ class SoftFoldGenerator:
         v2 = base_v2 + wb2
         v3 = base_v3 + wb3
         hy = base_hy + wb_h
+
+        l_v1, l_v2, l_v3, l_h = [], [], [], []
+        step = 5
+        
+        for y in range(0, h, step):
+            l_v1.append([float(v1[y, 0]), float(y)])
+            l_v2.append([float(v2[y, 0]), float(y)])
+            l_v3.append([float(v3[y, 0]), float(y)])
+            
+        for x in range(0, w, step):
+            l_h.append([float(x), float(hy[0, x])])
+            
+        fold_lines = [l_v1, l_v2, l_v3, l_h]
         
         amp_factor = 0.035 
         decay = 10.0
@@ -284,19 +322,19 @@ class SoftFoldGenerator:
         warped_mask = cv2.remap(mask_src, map_x, map_y, interpolation=cv2.INTER_LINEAR, 
                                 borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         
-        return warped_img, warped_mask
+        return warped_img, warped_mask, fold_lines
 
     def process_fold(self, img, fold_type):
         if fold_type == 1:
-            w_img, w_mask = self.apply_joined_pages_fold(img)
+            w_img, w_mask, fold_lines = self.apply_joined_pages_fold(img)
         elif fold_type == 2:
-            w_img, w_mask = self.apply_z_fold(img)
+            w_img, w_mask, fold_lines = self.apply_z_fold(img)
         elif fold_type == 3:
-            w_img, w_mask = self.apply_cross_fold(img)
+            w_img, w_mask, fold_lines = self.apply_cross_fold(img)
         elif fold_type == 4:
-            w_img, w_mask = self.apply_grid_fold(img)
+            w_img, w_mask, fold_lines = self.apply_grid_fold(img)
         else:
-            return img, np.ones(img.shape[:2], dtype=np.float32)
+            return img, np.ones(img.shape[:2], dtype=np.float32), []
 
         h_res, w_res = w_img.shape[:2]
         full_canvas_img = np.zeros((1400, 1400, 3), dtype=np.uint8)
@@ -308,7 +346,14 @@ class SoftFoldGenerator:
         full_canvas_img[y_offset:y_offset+h_res, x_offset:x_offset+w_res] = w_img
         full_canvas_mask[y_offset:y_offset+h_res, x_offset:x_offset+w_res] = w_mask
         
-        return full_canvas_img, full_canvas_mask.astype(np.float32)/255.0
+        adjusted_folds = []
+        for line in fold_lines:
+            adj_line = []
+            for pt in line:
+                adj_line.append([pt[0] + x_offset, pt[1] + y_offset])
+            adjusted_folds.append(adj_line)
+
+        return full_canvas_img, full_canvas_mask.astype(np.float32)/255.0, adjusted_folds
 
     def composite_final(self, doc_img, doc_mask, bg_img):
         if bg_img is None: return doc_img
@@ -348,7 +393,7 @@ def main():
         name = os.path.splitext(f)[0]
         
         for t_id, t_name in types.items():
-            final, mask = generator.process_fold(img, t_id)
+            final, mask, fold_lines = generator.process_fold(img, t_id)
                 
             if bg_img is not None:
                 bg_large = cv2.resize(bg_img, (1400, 1400))
@@ -378,8 +423,20 @@ def main():
                     
                     json_vertices.append([x_final, y_final])
 
+            json_folds = []
+            for line in fold_lines:
+                processed_line = []
+                for pt in line:
+                    fx, fy = pt
+                    fx_final = fx - crop_offset
+                    fy_final = fy - crop_offset
+                    
+                    processed_line.append([round(fx_final, 1), round(fy_final, 1)])
+                json_folds.append(processed_line)
+
             annotation = {
                 "vertices": json_vertices,
+                "folds": json_folds,
                 "reference": name,
                 "scan_image_path": abs_scan_path,
                 "folding": t_name,
