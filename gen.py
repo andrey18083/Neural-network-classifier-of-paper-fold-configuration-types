@@ -338,8 +338,12 @@ def main():
     crop_offset = 100 
 
     for f in doc_files:
-        img = cv2.imread(os.path.join(input_dir, f))
+        source_path = os.path.join(input_dir, f)
+        img = cv2.imread(source_path)
         if img is None: continue
+        
+        abs_scan_path = os.path.abspath(source_path)
+        
         img = cv2.resize(img, (600, 850))
         name = os.path.splitext(f)[0]
         
@@ -366,7 +370,6 @@ def main():
                 
                 for point in approx:
                     x, y = point[0]
-                    
                     x_final = int(x - crop_offset)
                     y_final = int(y - crop_offset)
                     
@@ -378,6 +381,7 @@ def main():
             annotation = {
                 "vertices": json_vertices,
                 "reference": name,
+                "scan_image_path": abs_scan_path,
                 "folding": t_name,
             }
 
